@@ -5,8 +5,6 @@ import quantutils.regression_utils as qu
 import quantutils.general_utils as genutils
 from quantutils.general_utils import get_df_regime_label
 import quantutils.streamlit_utils as stutils
-import concurrent.futures
-from concurrent.futures import ProcessPoolExecutor
 from functools import partial
 from tqdm.notebook import tqdm
 import plotly.express as px
@@ -15,7 +13,7 @@ from copy import deepcopy
 from plotly.subplots import make_subplots
 from pathlib import Path
 import os
-
+import datetime
 
 if 'transformations' not in st.session_state:
     st.session_state['transformations'] = {}
@@ -71,17 +69,15 @@ SIZE=300
 # df_monthly = df.copy() + np.random.randint(1, size=df.shape)
 # df_monthly.columns = ['A1', 'A2', 'A3', 'A4']
 
-df_monthly = pd.read_excel('../Data/sample_data.xlsx', skiprows=1)
-df_monthly.columns = ['Date', 'CPIUSA', 'CPIUNSA', 'ManheimUsedVehicle', 'PPIUsedVehicles', 'PPIAutomotive', 'PPIPassenger_Cars', '5yTreasury']
-df_monthly['Date'] = pd.to_datetime(df_monthly['Date'])
-df_monthly.set_index('Date', inplace=True)
+df = pd.read_excel('../Data/sample_data.xlsx', skiprows=1)
+df.columns = ['Date', 'CPIUSA', 'CPIUNSA', 'ManheimUsedVehicle', 'PPIUsedVehicles', 'PPIAutomotive', 'PPIPassenger_Cars', '5yTreasury']
+df['Date'] = pd.to_datetime(df['Date'])
+df.set_index('Date', inplace=True)
 
-df_monthly.columns = [f'{col}Monthly' for col in df_monthly.columns]
+df.columns = [f'{col}Monthly' for col in df.columns]
 
 
-df_daily = df_monthly.copy().iloc[:, :2]
-df_daily = df_daily  + np.random.randint(1, size=df_daily.shape)
-df_daily.columns = [f'A{i+1}' for i in range(len(df_daily.columns))]
+
 
 # N_MACRO = 3
 # MACRO_COLUMNS = ['Fed', 'GDP', 'VIX']
@@ -106,9 +102,9 @@ df_daily.columns = [f'A{i+1}' for i in range(len(df_daily.columns))]
 # df_regime_labelled = get_df_regime_label(df_regime_discrete, label_dict)
 
 
-feature_list = list(df_daily.columns) + list(df_monthly.columns)
+feature_list = list(df.columns)
 feature_list = list(set(feature_list))
-
+st.session_state['expanding'] = False
 #--------------------------------------------------------------------------------------
 variables = st.multiselect('Relevant Variables', feature_list)
 # st.session_state['target'] = y_variable
@@ -154,15 +150,9 @@ st.write(f"{st.session_state['transformations']}")
 
 if st.button('Create Transformations'):
     unique_cols = list(set(variables))
-    daily_columns = [col for col in unique_cols if col in df_daily.columns]
-    monthly_columns = [col for col in unique_cols if col in df_monthly.columns]
-    df_daily_transformed = qu.feature_engineering(df_daily[daily_columns], st.session_state['transformations'])
-    df_monthly_transformed = qu.feature_engineering(df_monthly[monthly_columns], st.session_state['transformations'])
-    unique_transformed_cols = list(set(list(df_daily_transformed.columns) + list(df_monthly_transformed.columns)))
-    # df_transformed = qu.feature_engineering(df[unique_cols], st.session_state['transformations'])
-    # st.session_state['df_transformed'] = df_transformed
-    st.session_state['df_daily_transformed'] = df_daily_transformed
-    st.session_state['df_monthly_transformed'] = df_monthly_transformed
+    unique_transformed_cols = list(df.columns)
+    df_transformed = qu.feature_engineering(df[unique_cols], st.session_state['transformations'])
+    st.session_state['df_transformed'] = df_transformed
     st.session_state['unique_transformed_cols'] = unique_transformed_cols
     st.write(unique_transformed_cols)
 
@@ -182,13 +172,14 @@ if st.button('Implement Lag'):
     ## Daily lag is straightforward
     ## Monthly lag is not
     ## What about natural lag?
-    df_daily_transformed_lag = qu.lag_variables(st.session_state['df_daily_transformed'], st.session_state['lag'])
-    df_monthly_transformed_lag = qu.lag_variables(st.session_state['df_monthly_transformed'], st.session_state['lag'])
-    st.session_state['df_daily_transformed_lag'] = df_daily_transformed_lag
-    st.session_state['df_monthly_transformed_lag'] = df_monthly_transformed_lag
-    df_transformed_lag = pd.concat([df_daily_transformed_lag, df_monthly_transformed_lag], axis=1).ffill()
+    # df_daily_transformed_lag = qu.lag_variables(st.session_state['df_daily_transformed'], st.session_state['lag'])
+    # df_monthly_transformed_lag = qu.lag_variables(st.session_state['df_monthly_transformed'], st.session_state['lag'])
+    # st.session_state['df_daily_transformed_lag'] = df_daily_transformed_lag
+    # st.session_state['df_monthly_transformed_lag'] = df_monthly_transformed_lag
+    # df_transformed_lag = pd.concat([df_daily_transformed_lag, df_monthly_transformed_lag], axis=1).ffill()
+    df_transformed= st.session_state['df_transformed']
 
-    df_transformed_lag = qu.natural_lag_monthly(df_transformed_lag)
+    df_transformed_lag = qu.natural_lag(df_transformed)
     st.session_state['df_transformed_lag'] = df_transformed_lag
     st.write(st.session_state['df_transformed_lag'].tail())
 
@@ -204,11 +195,11 @@ with st.form('X-variables in regression'):
         
 
         submit_x_variable_button = st.form_submit_button(label='Confirm X-Variables in Regression')
-        ## If all selected_x_variables is monthly, change df_transformed_lag to df_monthly_transformed_lag
-        check_if_all_monthly = [col for col in df_daily.columns if col in selected_x_variables]
+        # ## If all selected_x_variables is monthly, change df_transformed_lag to df_monthly_transformed_lag
+        # check_if_all_monthly = [col for col in df_daily.columns if col in selected_x_variables]
 
-        if check_if_all_monthly:
-            st.session_state['df_transformed_lag'] = deepcopy(st.session_state['df_monthly_transformed_lag'])
+        # if check_if_all_monthly:
+        #     st.session_state['df_transformed_lag'] = deepcopy(st.session_state['df_monthly_transformed_lag'])
 
 
 
@@ -256,15 +247,25 @@ with st.form('Rolling Windows'):
 with st.form('Refit Model Frequency'):
     n_step_ahead = st.number_input('Refitting Model Frequency (1 means daily fit)', value=1)
     submit_refit_freq = st.form_submit_button(label='Confirm Re-fit Model Freq')
+    expanding = st.checkbox('Expanding Window')
+    if expanding:
+        st.session_state['expanding'] = True
+        print('Expanding Window Mode Enabled')
     st.session_state['n_step_ahead'] = n_step_ahead
 
-
+with st.form('Start Date'):
+    start_date = st.date_input('Start Date', value=datetime.date(2000, 1, 1), format='YYYY/MM/DD', max_value=datetime.date.today())
+    submit_refit_freq = st.form_submit_button(label='Confirm Start Date')
+    st.session_state['start_date'] = pd.Timestamp(start_date)
+    st.session_state['df_transformed_lag'] = st.session_state['df_transformed_lag'][start_date:]
 
 if st.button('Run Regression'):
 
-    if 'df_transformed_lag' in st.session_state and 'selected_x_variables' and 'n_step_ahead' in st.session_state:
+    if 'df_transformed_lag' in st.session_state and 'selected_x_variables' and 'n_step_ahead' and 'start_date' in st.session_state:
+        
         df_regression = st.session_state['df_transformed_lag'][st.session_state['selected_x_variables']].copy()
         df_regression['target'] = st.session_state['df_transformed_lag'][st.session_state['selected_target']]
+        # df_regression = df_regression[st.session_state['start_date']:].copy()
         df_coefs_dict = {k: [] for k in st.session_state['selected_x_variables']}
         df_coefs_dict['predictions'] = []
         min_coef = []
@@ -272,9 +273,11 @@ if st.button('Run Regression'):
         for xvar in df_regression.drop('target', axis=1).columns:
             min_coef.append(st.session_state['min_coefs_dict'][xvar])
             max_coef.append(st.session_state['max_coefs_dict'][xvar])
+
+        
         for window in tqdm(st.session_state['windows']):
             df_results, model = qu.rolling_regression_sklearn_advanced(df_regression, rolling_window=window, n_step_ahead=st.session_state['n_step_ahead'],
-                                                                        dropna=True, min_coef=min_coef, max_coef=max_coef)
+                                                                        dropna=True, min_coef=min_coef, max_coef=max_coef, expanding=st.session_state['expanding'])
             for x_var in st.session_state['selected_x_variables']:
                 df_coefs_dict[x_var].append(df_results[[x_var]].rename(columns={f'{x_var}': f'{window}'}).squeeze())
             df_coefs_dict['predictions'].append(df_results[['predictions']].rename(columns={f'predictions': f'predictions_{window}'}).squeeze())
