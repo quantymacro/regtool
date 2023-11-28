@@ -176,7 +176,7 @@ def regression_analytics(regression_streamlit_state, df_regime_labelled=None):
     df_shap['pred'] = df_shap.sum(axis=1)
     # df_shap['pred'] = regression_streamlit_state['df_coefs_dict']['predictions'].mean(axis=1)
     st.write('#### Feature Contribution')
-    st.line_chart(df_shap)
+    st.line_chart(df_shap.dropna())
     st.write('#### Error Contribution')
     st.line_chart(df_error_contribution.abs().rolling(10).mean())
 

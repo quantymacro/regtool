@@ -12,7 +12,8 @@ def rolling_regression_sklearn_advanced(data, rolling_window, n_step_ahead=1,
                                         l1_ratio=0.1, 
                                         dropna=False, remove_outliers=False, 
                                         winsorize=False, winsorize_limits=(0.05, 0.95),
-                                        fit_intercept=False, min_coef=None, max_coef=None):
+                                        fit_intercept=False, min_coef=None, max_coef=None,
+                                        expanding=False):
     """
     Perform rolling regression from sklearn with additional data processing options.
     
@@ -41,7 +42,10 @@ def rolling_regression_sklearn_advanced(data, rolling_window, n_step_ahead=1,
     predictions = pd.Series(index=datac.index, name='predictions')
     
     for start in range(0, n_samples - rolling_window - n_step_ahead + 1, n_step_ahead):
-        window = datac.iloc[start:start + rolling_window].copy()  # Use copy to avoid SettingWithCopyWarning
+        if expanding:
+            window = datac.iloc[0:start + rolling_window].copy()  # Use copy to avoid SettingWithCopyWarning
+        else:
+            window = datac.iloc[start:start + rolling_window].copy()  # Use copy to avoid SettingWithCopyWarning
         
         # Remove outliers if requested
         if remove_outliers:
@@ -104,15 +108,25 @@ def lag_variables(df, lag_dict):
     return dfc
 
 
-def natural_lag_monthly(df):
-    # monthly_cols = [col for col in df.columns if (col.split('_')[1] == 'M') and (len(col.split('_')) > 1)]
-    monthly_cols = []
-    for col in df.columns:
-        if 'Monthly' in col:
-            monthly_cols.append(col)
-    monthly_cols_not_lagged = [col for col in monthly_cols if 'lag' not in col]
+# def natural_lag_monthly(df):
+#     # monthly_cols = [col for col in df.columns if (col.split('_')[1] == 'M') and (len(col.split('_')) > 1)]
+#     monthly_cols = []
+#     for col in df.columns:
+#         if 'Monthly' in col:
+#             monthly_cols.append(col)
+#     monthly_cols_not_lagged = [col for col in monthly_cols if 'lag' not in col]
+#     dfc = df.copy()
+#     for col in monthly_cols_not_lagged:
+#         dfc[f'{col}_natlag1'] = dfc[col].shift(1)
+
+#     return dfc
+
+
+def natural_lag(df):
+
+    cols_not_lagged = [col for col in df.columns if 'lag' not in col]
     dfc = df.copy()
-    for col in monthly_cols_not_lagged:
+    for col in cols_not_lagged:
         dfc[f'{col}_natlag1'] = dfc[col].shift(1)
 
     return dfc
@@ -120,7 +134,8 @@ def natural_lag_monthly(df):
 
 def generate_stats_table(regression_streamlit_state):
     y_pred = regression_streamlit_state['df_coefs_dict']['predictions'].dropna()
-    y_true = regression_streamlit_state['df_transformed_lag'][regression_streamlit_state['selected_target']]
+    y_true = regression_streamlit_state['df_transformed_lag'][regression_streamlit_state['selected_target']].loc[y_pred.index].dropna()
+    y_pred = y_pred.loc[y_true.index]
     stats = [('r2', col, r2_score(y_true.loc[y_pred.index].values, y_pred[col])) for col in y_pred.columns]  + \
         [('mse', col, mean_squared_error(y_true.loc[y_pred.index].values, y_pred[col])) for col in y_pred.columns] + \
         [('mae', col, mean_absolute_error(y_true.loc[y_pred.index].values, y_pred[col])) for col in y_pred.columns] + \
